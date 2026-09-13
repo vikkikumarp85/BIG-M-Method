@@ -1,0 +1,136 @@
+import numpy as np
+
+
+def big_m(c, A, b, signs, M=10**6):
+    m, n = len(A), len(c)
+
+    # Columns:
+    # decision variables + slack/surplus variables + artificial variables + RHS
+    T = np.zeros((m + 1, n + 2 * m + 1))
+    T[1:, :n] = np.array(A, dtype=float)
+    T[1:, -1] = np.array(b, dtype=float)
+
+    names = [f"x{i+1}" for i in range(n)]
+    names += [f"s{i+1}" for i in range(m)]
+    names += [f"a{i+1}" for i in range(m)]
+
+    basis = []
+
+    # Convert constraints to equality form.
+    for i, sign in enumerate(signs):
+        if sign == "<=":
+            T[i + 1, n + i] = 1
+            basis.append(n + i)
+
+        elif sign == ">=":
+            T[i + 1, n + i] = -1       # surplus variable
+            T[i + 1, n + m + i] = 1    # artificial variable
+            basis.append(n + m + i)
+
+        elif sign == "=":
+            T[i + 1, n + m + i] = 1    # artificial variable
+            basis.append(n + m + i)
+
+        else:
+            raise ValueError("Signs must be <=, >=, or =.")
+
+    # Maximization objective: artificial variables receive -M penalty.
+    T[0, :n] = c
+
+    # Make the objective row consistent with the initial artificial basis.
+    for i, sign in enumerate(signs):
+        if sign in (">=", "="):
+            T[0, n + m + i] = -M
+            T[0] += M * T[i + 1]
+
+    print("Big-M Simplex Method")
+    print("Initial basic variables:",
+          ", ".join(names[i] for i in basis))
+
+    iteration = 0
+
+    while True:
+        # Positive value in the objective row means an improving entering variable.
+        col = np.argmax(T[0, :-1])
+
+        if T[0, col] <= 1e-9:
+            break
+
+        # Minimum ratio test.
+        ratios = []
+        for i in range(1, m + 1):
+            if T[i, col] > 1e-9:
+                ratios.append((T[i, -1] / T[i, col], i))
+
+        if not ratios:
+            raise ValueError("The LP is unbounded.")
+
+        _, row = min(ratios)
+
+        entering = col
+        leaving = basis[row - 1]
+        iteration += 1
+
+        print(
+            f"Iteration {iteration}: "
+            f"Enter {names[entering]}, "
+            f"Leave {names[leaving]}"
+        )
+
+        # Pivot.
+        T[row] /= T[row, col]
+
+        for i in range(m + 1):
+            if i != row:
+                T[i] -= T[i, col] * T[row]
+
+        basis[row - 1] = entering
+
+    # Extract decision-variable values.
+    x = np.zeros(n)
+    for i, basic_col in enumerate(basis):
+        if basic_col < n:
+            x[basic_col] = T[i + 1, -1]
+
+    # A positive artificial variable means the original LP is infeasible.
+    for i, basic_col in enumerate(basis):
+        if basic_col >= n + m and T[i + 1, -1] > 1e-7:
+            raise ValueError("The problem is infeasible.")
+
+    # With this tableau convention, the RHS of the objective row is -Z.
+    z = -T[0, -1]
+
+    print("\nOptimal Solution")
+    for i, value in enumerate(x):
+        print(f"x{i+1} = {value:.2f}")
+
+    print(f"Maximum Profit = {z:.2f}")
+
+    return x, z
+
+
+# -------------------------------------------------
+# CASE STUDY: PRODUCT MIX OPTIMIZATION
+#
+# Maximize:
+#     Z = 40x1 + 30x2
+#
+# Subject to:
+#     2x1 + x2 <= 40
+#     x1 + 2x2 >= 20
+#     x1 + x2  = 30
+#     x1, x2 >= 0
+# -------------------------------------------------
+
+c = [40, 30]
+
+A = [
+    [2, 1],
+    [1, 2],
+    [1, 1]
+]
+
+b = [40, 20, 30]
+signs = ["<=", ">=", "="]
+
+big_m(c, A, b, signs)
